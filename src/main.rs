@@ -197,7 +197,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
         let r = request.body(Body::from(app_config.request_body)).expect("request");
         resp = http_client.request(r).await?;
     }
-    else if app_config.http_method == HttpMethod::Post{
+    else if app_config.http_method == HttpMethod::Put{
         let mut request = Request::builder().method("PUT").uri(app_config.request_url.clone());
         if !app_config.auth_type.is_empty(){
             request = request.header("Authorization", app_config.auth_type.clone() + " " + &app_config.auth_value);
