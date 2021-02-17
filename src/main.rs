@@ -4,9 +4,13 @@ extern crate hyper;
 
 //usings
 use clap::{Arg, App, SubCommand};
+use tokio::io::{stdout, AsyncWriteExt as _};
 use hyper::Client;
-use hyper::Body;
+use hyper::body::{HttpBody, Body};
 use hyper::Response;
+use hyper::Request;
+use hyper_tls::HttpsConnector;
+use std::io::Read;
 
 #[derive(Debug, PartialEq)]
 enum HttpMethod{
@@ -122,12 +126,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
         app_config.request_content_type = provided_request_content_type.unwrap().parse().unwrap();
     }
 
+    //setup request uri
     let provided_request_url = matches.value_of("requesturl");
     if provided_request_url == None{
         panic!("Request url was not provided");
     }
     app_config.request_url = provided_request_url.unwrap().parse().unwrap();
 
+    //DEBUG remove
     println!("Here are the values you provided. HTTP Method: {:?}, Request Body: {}, Request Body as File: {}, Request Content Type: {}, Request URL: {}",
         app_config.http_method,
         app_config.request_body,
@@ -136,18 +142,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
         app_config.request_url
     );
 
-    //setup http client
-    let http_client = Client::new();
+    //setup SSL/TLS http client
+    let https = HttpsConnector::new();
+    let http_client = Client::builder().build::<_, hyper::Body>(https);
 
     //make appropriate http call
-    let resp: Response<Body>;
+    let mut resp: Response<Body> = Response::default();
     if app_config.http_method == HttpMethod::Get{
-        resp = http_client.get(app_config.request_url.parse()?).await?;
+        resp = http_client.get(app_config.request_url.parse().unwrap()).await?;
     }
     else if app_config.http_method == HttpMethod::Post{
-        
+        let request = Request::builder().header("content-type", app_config.request_content_type.clone()).method("POST").uri(app_config.request_url.clone()).body(Body::from(app_config.request_body)).expect("request builder");
+        resp = http_client.request(request).await?;
+    }
+    else if app_config.http_method == HttpMethod::Post{
+        let request = Request::builder().method("PUT").uri(app_config.request_url.clone()).body(Body::from(app_config.request_body)).expect("request builder");
+        resp = http_client.request(request).await?;
+    }
+    else if app_config.http_method == HttpMethod::Post{
+        let request = Request::delete(app_config.request_url.clone()).body(Body::from("")).unwrap();
+        resp = http_client.request(request).await?;
     }
 
+    //print response
+    println!("RESPONSE STATUS CODE: {}", resp.status());
+    println!("RESPONSE BODY");
+    for chunk in resp.body_mut().data().await{
+        stdout().write_all(&chunk?).await?;
+    }
 
     return Ok(());
 }
