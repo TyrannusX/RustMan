@@ -27,7 +27,9 @@ struct AppConfiguration{
     request_body: String,
     request_body_as_file: String,
     request_content_type: String,
-    request_url: String
+    request_url: String,
+    auth_type: String,
+    auth_value: String
 }
 
 impl AppConfiguration{
@@ -37,7 +39,9 @@ impl AppConfiguration{
             request_body: "".parse().unwrap(),
             request_body_as_file: "".parse().unwrap(),
             request_content_type: "".parse().unwrap(),
-            request_url: "".parse().unwrap()
+            request_url: "".parse().unwrap(),
+            auth_type: "".parse().unwrap(),
+            auth_value: "".parse().unwrap()
         };
     }
 }
@@ -72,6 +76,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
                     .arg(Arg::with_name("requestcontenttype")
                         .long("requestcontenttype")
                         .value_name("REQUEST_BODY_AS_FILE")
+                        .required(false)
+                        .takes_value(true))
+                    .arg(Arg::with_name("authtype")
+                        .long("authtype")
+                        .value_name("AUTH_TYPE")
+                        .required(false)
+                        .takes_value(true))
+                    .arg(Arg::with_name("authvalue")
+                        .long("authvalue")
+                        .value_name("AUTH_VALUE")
                         .required(false)
                         .takes_value(true))
                     .get_matches();
@@ -133,6 +147,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
     }
     app_config.request_url = provided_request_url.unwrap().parse().unwrap();
 
+    //setup auth type
+    let provided_auth_type = matches.value_of("authtype");
+    if provided_auth_type != None{
+        app_config.auth_type = provided_auth_type.unwrap().parse().unwrap();
+        if app_config.auth_type.to_lowercase() != "bearer"
+            && app_config.auth_type.to_lowercase() != "basic"{
+            panic!("Invalid auth type provided: {}", app_config.auth_type);
+        }
+    }
+
+    //get auth value
+    let provided_auth_value = matches.value_of("authvalue");
+    if !app_config.auth_type.is_empty() && provided_auth_value != None{
+        app_config.auth_value = provided_auth_value.unwrap().parse().unwrap();
+    }
+    else if !app_config.auth_type.is_empty() && provided_auth_value == None{
+        panic!("Auth value was not provided");
+    }
+
     //DEBUG remove
     println!("Here are the values you provided. HTTP Method: {:?}, Request Body: {}, Request Body as File: {}, Request Content Type: {}, Request URL: {}",
         app_config.http_method,
@@ -149,19 +182,36 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>>{
     //make appropriate http call
     let mut resp: Response<Body> = Response::default();
     if app_config.http_method == HttpMethod::Get{
-        resp = http_client.get(app_config.request_url.parse().unwrap()).await?;
+        let mut request = Request::get(app_config.request_url.clone());
+        if !app_config.auth_type.is_empty(){
+            request = request.header("Authorization", app_config.auth_type.clone() + " " + &app_config.auth_value);
+        }
+        let r = request.body(Body::from("")).unwrap();
+        resp = http_client.request(r).await?;
     }
     else if app_config.http_method == HttpMethod::Post{
-        let request = Request::builder().header("content-type", app_config.request_content_type.clone()).method("POST").uri(app_config.request_url.clone()).body(Body::from(app_config.request_body)).expect("request builder");
-        resp = http_client.request(request).await?;
+        let mut request = Request::builder().header("content-type", app_config.request_content_type.clone()).method("POST").uri(app_config.request_url.clone());
+        if !app_config.auth_type.is_empty(){
+            request = request.header("Authorization", app_config.auth_type.clone() + " " + &app_config.auth_value);
+        }
+        let r = request.body(Body::from(app_config.request_body)).expect("request");
+        resp = http_client.request(r).await?;
     }
     else if app_config.http_method == HttpMethod::Post{
-        let request = Request::builder().method("PUT").uri(app_config.request_url.clone()).body(Body::from(app_config.request_body)).expect("request builder");
-        resp = http_client.request(request).await?;
+        let mut request = Request::builder().method("PUT").uri(app_config.request_url.clone());
+        if !app_config.auth_type.is_empty(){
+            request = request.header("Authorization", app_config.auth_type.clone() + " " + &app_config.auth_value);
+        }
+        let r = request.body(Body::from(app_config.request_body)).expect("request");
+        resp = http_client.request(r).await?;
     }
-    else if app_config.http_method == HttpMethod::Post{
-        let request = Request::delete(app_config.request_url.clone()).body(Body::from("")).unwrap();
-        resp = http_client.request(request).await?;
+    else if app_config.http_method == HttpMethod::Delete{
+        let mut request = Request::delete(app_config.request_url.clone());
+        if !app_config.auth_type.is_empty(){
+            request = request.header("Authorization", app_config.auth_type.clone() + " " + &app_config.auth_value);
+        }
+        let r = request.body(Body::from("")).unwrap();
+        resp = http_client.request(r).await?;
     }
 
     //print response
